@@ -45,10 +45,7 @@ impl MemoryInjector {
     /// hook response with `appendSystemContext` on the response topic.
     /// If the file is missing or empty, this is a no-op.
     #[astrid::interceptor("on_before_prompt_build")]
-    pub fn on_before_prompt_build(
-        &self,
-        payload: serde_json::Value,
-    ) -> Result<(), SysError> {
+    pub fn on_before_prompt_build(&self, payload: serde_json::Value) -> Result<(), SysError> {
         // The dispatcher unwraps IpcPayload::Custom before delivery, so
         // fields like response_topic are at the top level of `payload`.
         let response_topic = payload
