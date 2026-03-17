@@ -24,7 +24,7 @@ const MAX_MEMORY_BYTES: usize = 32_768;
 
 /// Input for the `add_memory` tool.
 #[derive(Deserialize, JsonSchema)]
-pub(crate) struct AddMemoryInput {
+pub struct AddMemoryInput {
     /// The full memory content to store.
     content: String,
 }
@@ -67,6 +67,55 @@ impl MemoryCapsule {
         ipc::publish_json(
             response_topic,
             &serde_json::json!({ "appendSystemContext": section }),
+        )?;
+
+        Ok(())
+    }
+
+    /// Handles `/memory-export` command from the CLI.
+    ///
+    /// Reads memory from KV and writes it to `.astrid/memory.md` in the
+    /// workspace, then responds to the user.
+    #[astrid::interceptor("handle_command")]
+    pub fn handle_command(&self, payload: serde_json::Value) -> Result<(), SysError> {
+        let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let session_id = payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        if text.trim() != "memory-export" {
+            return Ok(());
+        }
+
+        let content = match kv::get_bytes(MEMORY_KEY) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => String::new(),
+        };
+
+        if content.trim().is_empty() {
+            ipc::publish_json(
+                "agent.v1.response",
+                &serde_json::json!({
+                    "type": "agent_response",
+                    "text": "No memory stored yet.",
+                    "is_final": true,
+                    "session_id": session_id,
+                }),
+            )?;
+            return Ok(());
+        }
+
+        fs::write(".astrid/memory.md", &content)?;
+
+        ipc::publish_json(
+            "agent.v1.response",
+            &serde_json::json!({
+                "type": "agent_response",
+                "text": format!("Memory exported to .astrid/memory.md ({} bytes)", content.len()),
+                "is_final": true,
+                "session_id": session_id,
+            }),
         )?;
 
         Ok(())
