@@ -1,7 +1,7 @@
 [package]
 name = "astrid-capsule-memory"
-version = "0.1.0"
-description = "Injects cross-session memory into the system prompt via prompt builder hooks"
+version = "0.2.0"
+description = "Cross-session memory via KV store, injected into system prompt"
 authors = ["Astrid Core Team"]
 astrid-version = ">=0.1.0"
 
@@ -9,7 +9,6 @@ astrid-version = ">=0.1.0"
 id = "memory"
 file = "astrid_capsule_memory.wasm"
 type = "executable"
-capabilities = { fs_read = ["workspace://"] }
 
 [capabilities]
 allow_prompt_injection = true
