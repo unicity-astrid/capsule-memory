@@ -15,6 +15,8 @@ use serde::Deserialize;
 
 /// KV key for the memory content.
 const MEMORY_KEY: &str = "memory";
+/// Export path for `/memory-export` command.
+const MEMORY_EXPORT_PATH: &str = ".astrid/memory.md";
 
 /// Maximum size in bytes for memory content.
 ///
@@ -106,13 +108,13 @@ impl MemoryCapsule {
             return Ok(());
         }
 
-        fs::write(".astrid/memory.md", &content)?;
+        fs::write(MEMORY_EXPORT_PATH, &content)?;
 
         ipc::publish_json(
             "agent.v1.response",
             &serde_json::json!({
                 "type": "agent_response",
-                "text": format!("Memory exported to .astrid/memory.md ({} bytes)", content.len()),
+                "text": format!("Memory exported to {MEMORY_EXPORT_PATH} ({} bytes)", content.len()),
                 "is_final": true,
                 "session_id": session_id,
             }),
