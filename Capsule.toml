@@ -1,7 +1,7 @@
 [package]
 name = "astrid-capsule-memory"
-version = "0.1.0"
-description = "Injects cross-session memory into the system prompt via prompt builder hooks"
+version = "0.2.0"
+description = "Cross-session memory via KV store, injected into system prompt"
 authors = ["Astrid Core Team"]
 astrid-version = ">=0.1.0"
 
@@ -9,12 +9,20 @@ astrid-version = ">=0.1.0"
 id = "memory"
 file = "astrid_capsule_memory.wasm"
 type = "executable"
-capabilities = { fs_read = ["workspace://"] }
 
 [capabilities]
 allow_prompt_injection = true
-ipc_publish = ["prompt_builder.v1.hook_response.*"]
+ipc_publish = ["prompt_builder.v1.hook_response.*", "agent.v1.response"]
+fs_write = ["workspace://"]
 
 [[interceptor]]
 event = "prompt_builder.v1.hook.before_build"
 action = "on_before_prompt_build"
+
+[[interceptor]]
+event = "cli.v1.command.execute"
+action = "handle_command"
+
+[[command]]
+name = "memory-export"
+description = "Export cross-session memory to a .md file"

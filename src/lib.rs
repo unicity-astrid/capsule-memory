@@ -5,49 +5,44 @@
 
 //! Cross-session memory capsule for Astrid OS.
 //!
-//! Hooks into the prompt builder pipeline via
-//! `prompt_builder.v1.hook.before_build` and appends the contents of
-//! `.astrid/memory.md` to the system prompt using `appendSystemContext`.
-//!
-//! The agent maintains this file using existing `write_file` /
-//! `replace_in_file` tools from `astrid-capsule-fs`. No new tools are
-//! needed - this capsule is read-only.
-//!
-//! **Note:** This capsule handles the read/inject side only. The agent
-//! needs instructions telling it to *write* to `.astrid/memory.md` in
-//! the first place. That will come via the capsule instruction channel
-//! (`AGENTS.md` per capsule) tracked in [#448].
+//! Stores agent memory in the capsule's KV store and injects it into the
+//! system prompt via `prompt_builder.v1.hook.before_build`. Exposes an
+//! `add_memory` tool so the agent can persist notes across sessions.
 
 use astrid_sdk::prelude::*;
+use astrid_sdk::schemars::{self, JsonSchema};
+use serde::Deserialize;
 
-/// Maximum size in bytes for the cross-session memory file.
+/// KV key for the memory content.
+const MEMORY_KEY: &str = "memory";
+/// Export path for `/memory-export` command.
+const MEMORY_EXPORT_PATH: &str = ".astrid/memory.md";
+
+/// Maximum size in bytes for memory content.
 ///
 /// Prevents unbounded context window consumption from agent-written
-/// content. Unlike AGENTS.md (human-authored), memory.md is written by
-/// the agent and can grow without limit.
+/// content. Memory is truncated at the nearest char boundary if exceeded.
 const MAX_MEMORY_BYTES: usize = 32_768;
 
-/// Path to the memory file relative to the workspace root.
-///
-/// The VFS strips absolute prefixes via `make_relative()` and resolves
-/// against the workspace root, so a relative path works correctly.
-const MEMORY_PATH: &str = ".astrid/memory.md";
+/// Input for the `add_memory` tool.
+#[derive(Deserialize, JsonSchema)]
+pub struct AddMemoryInput {
+    /// The full memory content to store.
+    content: String,
+}
 
-/// Cross-session memory injector capsule.
+/// Cross-session memory capsule.
 #[derive(Default)]
-pub struct MemoryInjector;
+pub struct MemoryCapsule;
 
 #[capsule]
-impl MemoryInjector {
+impl MemoryCapsule {
     /// Intercepts `prompt_builder.v1.hook.before_build` events.
     ///
-    /// Reads `.astrid/memory.md` from the workspace and publishes a
-    /// hook response with `appendSystemContext` on the response topic.
-    /// If the file is missing or empty, this is a no-op.
+    /// Reads memory from KV and publishes a hook response with
+    /// `appendSystemContext`. If memory is empty, this is a no-op.
     #[astrid::interceptor("on_before_prompt_build")]
     pub fn on_before_prompt_build(&self, payload: serde_json::Value) -> Result<(), SysError> {
-        // The dispatcher unwraps IpcPayload::Custom before delivery, so
-        // fields like response_topic are at the top level of `payload`.
         let response_topic = payload
             .get("response_topic")
             .and_then(|v| v.as_str())
@@ -55,10 +50,14 @@ impl MemoryInjector {
                 SysError::ApiError("missing response_topic in before_build payload".into())
             })?;
 
-        let content = match fs::read_to_string(MEMORY_PATH) {
-            Ok(c) if !c.trim().is_empty() => c,
-            _ => return Ok(()),
+        let content = match kv::get_bytes(MEMORY_KEY) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => return Ok(()),
         };
+
+        if content.trim().is_empty() {
+            return Ok(());
+        }
 
         let section = if content.len() > MAX_MEMORY_BYTES {
             let end = content.floor_char_boundary(MAX_MEMORY_BYTES);
@@ -73,5 +72,75 @@ impl MemoryInjector {
         )?;
 
         Ok(())
+    }
+
+    /// Handles `/memory-export` command from the CLI.
+    ///
+    /// Reads memory from KV and writes it to `.astrid/memory.md` in the
+    /// workspace, then responds to the user.
+    #[astrid::interceptor("handle_command")]
+    pub fn handle_command(&self, payload: serde_json::Value) -> Result<(), SysError> {
+        let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let session_id = payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        if text.trim() != "memory-export" {
+            return Ok(());
+        }
+
+        let content = match kv::get_bytes(MEMORY_KEY) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => String::new(),
+        };
+
+        if content.trim().is_empty() {
+            ipc::publish_json(
+                "agent.v1.response",
+                &serde_json::json!({
+                    "type": "agent_response",
+                    "text": "No memory stored yet.",
+                    "is_final": true,
+                    "session_id": session_id,
+                }),
+            )?;
+            return Ok(());
+        }
+
+        fs::write(MEMORY_EXPORT_PATH, &content)?;
+
+        ipc::publish_json(
+            "agent.v1.response",
+            &serde_json::json!({
+                "type": "agent_response",
+                "text": format!("Memory exported to {MEMORY_EXPORT_PATH} ({} bytes)", content.len()),
+                "is_final": true,
+                "session_id": session_id,
+            }),
+        )?;
+
+        Ok(())
+    }
+
+    /// Persist cross-session memory. Use this to store notes, user
+    /// preferences, project context, or anything that should survive
+    /// across sessions. Overwrites the entire memory content — check
+    /// the existing memory in the system prompt context and include
+    /// it if you need to append rather than replace.
+    #[astrid::tool]
+    pub fn add_memory(&self, input: AddMemoryInput) -> Result<serde_json::Value, SysError> {
+        if input.content.len() > MAX_MEMORY_BYTES {
+            return Err(SysError::ApiError(format!(
+                "memory content exceeds maximum size of {MAX_MEMORY_BYTES} bytes"
+            )));
+        }
+
+        kv::set_bytes(MEMORY_KEY, input.content.as_bytes())?;
+
+        Ok(serde_json::json!({
+            "status": "ok",
+            "bytes_written": input.content.len()
+        }))
     }
 }
