@@ -39,8 +39,11 @@ pub struct MemoryInjector;
 /// Reads `cwd_dir` from capsule env (set by the distro to e.g. `.astrid`).
 /// Falls back to `.astrid` if unconfigured.
 fn memory_path() -> String {
-    let dir = env::var("cwd_dir").unwrap_or_else(|_| DEFAULT_CWD_DIR.to_string());
-    format!("cwd://{dir}/memory.md")
+    let dir = env::var("cwd_dir");
+    format!(
+        "cwd://{}/memory.md",
+        dir.as_deref().unwrap_or(DEFAULT_CWD_DIR)
+    )
 }
 
 #[capsule]
