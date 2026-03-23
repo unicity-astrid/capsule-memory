@@ -6,39 +6,36 @@
 //! Cross-session memory capsule for Astrid OS.
 //!
 //! Hooks into the prompt builder pipeline via
-//! `prompt_builder.v1.hook.before_build` and appends the contents of
-//! `{cwd_dir}/memory.md` to the system prompt using `appendSystemContext`.
+//! `prompt_builder.v1.hook.before_build` and injects memory from two sources:
 //!
-//! The folder name is read from the `cwd_dir` env config (default `.astrid`,
-//! set by the distro). This makes the capsule brand-agnostic — a rebranded
-//! distro can set `cwd_dir = ".myagent"` without forking the capsule.
+//! - **Personal** (`home://memory.md`) — user preferences, communication style,
+//!   long-term facts about the user. Always injected regardless of project.
+//! - **Project** (`cwd://{cwd_dir}/memory.md`) — project-specific context,
+//!   current work, conventions. Only present when working inside a project.
 //!
-//! The agent maintains this file using existing `write_file` /
-//! `replace_in_file` tools from `astrid-capsule-fs`. No new tools are
-//! needed - this capsule is read-only.
+//! Both are optional — missing or empty files are silently skipped.
+//! Personal memory is injected first; project memory appends after.
+//!
+//! The project folder name is read from the `cwd_dir` env config (set by the
+//! distro). A rebranded distro sets `cwd_dir = ".myagent"` without forking.
 
 use astrid_sdk::prelude::*;
 
-/// Maximum size in bytes for the cross-session memory file.
+/// Maximum bytes per memory section.
 ///
-/// Prevents unbounded context window consumption from agent-written
-/// content. Unlike AGENTS.md (human-authored), memory.md is written by
-/// the agent and can grow without limit.
+/// Applied independently to personal and project memory to prevent either
+/// from crowding out the other or consuming unbounded context window.
 const MAX_MEMORY_BYTES: usize = 32_768;
 
-/// Default project folder name, used when `cwd_dir` env is not configured.
-/// In practice the distro always sets this — the default is a last resort.
+/// Default project folder name — last resort if distro did not set `cwd_dir`.
 const DEFAULT_CWD_DIR: &str = ".astrid";
 
 /// Cross-session memory injector capsule.
 #[derive(Default)]
 pub struct MemoryInjector;
 
-/// Resolve the memory file path from env config.
-///
-/// Reads `cwd_dir` from capsule env (set by the distro to e.g. `.astrid`).
-/// Falls back to `.astrid` if unconfigured.
-fn memory_path() -> String {
+/// Path to the project-local memory file.
+fn project_memory_path() -> String {
     let dir = env::var("cwd_dir");
     format!(
         "cwd://{}/memory.md",
@@ -46,13 +43,33 @@ fn memory_path() -> String {
     )
 }
 
+/// Truncate content to `MAX_MEMORY_BYTES` on a char boundary.
+fn truncate(content: &str) -> (&str, bool) {
+    if content.len() > MAX_MEMORY_BYTES {
+        (
+            &content[..content.floor_char_boundary(MAX_MEMORY_BYTES)],
+            true,
+        )
+    } else {
+        (content, false)
+    }
+}
+
+/// Read a memory file, returning `None` if missing or empty.
+fn read_memory(path: &str) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(c) if !c.trim().is_empty() => Some(c),
+        _ => None,
+    }
+}
+
 #[capsule]
 impl MemoryInjector {
     /// Intercepts `prompt_builder.v1.hook.before_build` events.
     ///
-    /// Reads `{cwd_dir}/memory.md` from the project CWD and publishes a
-    /// hook response with `appendSystemContext` on the response topic.
-    /// If the file is missing or empty, this is a no-op.
+    /// Reads personal memory (`home://memory.md`) and project memory
+    /// (`cwd://{cwd_dir}/memory.md`), injects both into the system prompt.
+    /// Either or both may be absent — silently skipped if so.
     #[astrid::interceptor("on_before_prompt_build")]
     pub fn on_before_prompt_build(&self, payload: serde_json::Value) -> Result<(), SysError> {
         let response_topic = payload
@@ -62,22 +79,33 @@ impl MemoryInjector {
                 SysError::ApiError("missing response_topic in before_build payload".into())
             })?;
 
-        let path = memory_path();
-        let content = match fs::read_to_string(&path) {
-            Ok(c) if !c.trim().is_empty() => c,
-            _ => return Ok(()),
-        };
+        let personal = read_memory("home://memory.md");
+        let project = read_memory(&project_memory_path());
 
-        let section = if content.len() > MAX_MEMORY_BYTES {
-            let end = content.floor_char_boundary(MAX_MEMORY_BYTES);
-            format!("# Memory\n\n{}\n\n[Memory truncated]", &content[..end])
-        } else {
-            format!("# Memory\n\n{content}")
-        };
+        let sections = [
+            (personal.as_deref(), "personal"),
+            (project.as_deref(), "project"),
+        ]
+        .iter()
+        .filter_map(|(content, label)| content.map(|c| (c, *label)))
+        .map(|(content, label)| {
+            let (text, truncated) = truncate(content);
+            let mut section = format!("# Memory ({label})\n\n{text}");
+            if truncated {
+                section.push_str("\n\n[Memory truncated]");
+            }
+            section
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+        if sections.is_empty() {
+            return Ok(());
+        }
 
         ipc::publish_json(
             response_topic,
-            &serde_json::json!({ "appendSystemContext": section }),
+            &serde_json::json!({ "appendSystemContext": sections }),
         )?;
 
         Ok(())
