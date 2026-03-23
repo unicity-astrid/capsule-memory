@@ -18,7 +18,7 @@ ipc_publish = ["prompt_builder.v1.hook_response.*"]
 [env]
 # Name of the project folder scanned for memory.md (set by the distro).
 # Override to rebrand without forking: set cwd_dir = ".myagent" in your Distro.toml.
-cwd_dir = { prompt = "Project folder name (e.g. .astrid)", secret = false }
+cwd_dir = { type = "string", request = "Project folder name", default = ".astrid" }
 
 [[interceptor]]
 event = "prompt_builder.v1.hook.before_build"
