@@ -27,11 +27,12 @@ use astrid_sdk::prelude::*;
 /// the agent and can grow without limit.
 const MAX_MEMORY_BYTES: usize = 32_768;
 
-/// Path to the memory file relative to the workspace root.
+/// Path to the memory file in the workspace VFS.
 ///
-/// The VFS strips absolute prefixes via `make_relative()` and resolves
-/// against the workspace root, so a relative path works correctly.
-const MEMORY_PATH: &str = ".astrid/memory.md";
+/// Uses the `cwd://` scheme so the kernel resolves the path against
+/// the CWD and the capability check against `fs_read = ["cwd://"]`
+/// succeeds. A bare relative path would resolve against CWD and be denied.
+const MEMORY_PATH: &str = "cwd://.astrid/memory.md";
 
 /// Cross-session memory injector capsule.
 #[derive(Default)]
