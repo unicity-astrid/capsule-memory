@@ -7,16 +7,15 @@
 //!
 //! Hooks into the prompt builder pipeline via
 //! `prompt_builder.v1.hook.before_build` and appends the contents of
-//! `.astrid/memory.md` to the system prompt using `appendSystemContext`.
+//! `{cwd_dir}/memory.md` to the system prompt using `appendSystemContext`.
+//!
+//! The folder name is read from the `cwd_dir` env config (default `.astrid`,
+//! set by the distro). This makes the capsule brand-agnostic — a rebranded
+//! distro can set `cwd_dir = ".myagent"` without forking the capsule.
 //!
 //! The agent maintains this file using existing `write_file` /
 //! `replace_in_file` tools from `astrid-capsule-fs`. No new tools are
 //! needed - this capsule is read-only.
-//!
-//! **Note:** This capsule handles the read/inject side only. The agent
-//! needs instructions telling it to *write* to `.astrid/memory.md` in
-//! the first place. That will come via the capsule instruction channel
-//! (`AGENTS.md` per capsule) tracked in [#448].
 
 use astrid_sdk::prelude::*;
 
@@ -27,28 +26,35 @@ use astrid_sdk::prelude::*;
 /// the agent and can grow without limit.
 const MAX_MEMORY_BYTES: usize = 32_768;
 
-/// Path to the memory file in the workspace VFS.
-///
-/// Uses the `cwd://` scheme so the kernel resolves the path against
-/// the CWD and the capability check against `fs_read = ["cwd://"]`
-/// succeeds. A bare relative path would resolve against CWD and be denied.
-const MEMORY_PATH: &str = "cwd://.astrid/memory.md";
+/// Default project folder name, used when `cwd_dir` env is not configured.
+/// In practice the distro always sets this — the default is a last resort.
+const DEFAULT_CWD_DIR: &str = ".astrid";
 
 /// Cross-session memory injector capsule.
 #[derive(Default)]
 pub struct MemoryInjector;
 
+/// Resolve the memory file path from env config.
+///
+/// Reads `cwd_dir` from capsule env (set by the distro to e.g. `.astrid`).
+/// Falls back to `.astrid` if unconfigured.
+fn memory_path() -> String {
+    let dir = env::var("cwd_dir");
+    format!(
+        "cwd://{}/memory.md",
+        dir.as_deref().unwrap_or(DEFAULT_CWD_DIR)
+    )
+}
+
 #[capsule]
 impl MemoryInjector {
     /// Intercepts `prompt_builder.v1.hook.before_build` events.
     ///
-    /// Reads `.astrid/memory.md` from the workspace and publishes a
+    /// Reads `{cwd_dir}/memory.md` from the project CWD and publishes a
     /// hook response with `appendSystemContext` on the response topic.
     /// If the file is missing or empty, this is a no-op.
     #[astrid::interceptor("on_before_prompt_build")]
     pub fn on_before_prompt_build(&self, payload: serde_json::Value) -> Result<(), SysError> {
-        // The dispatcher unwraps IpcPayload::Custom before delivery, so
-        // fields like response_topic are at the top level of `payload`.
         let response_topic = payload
             .get("response_topic")
             .and_then(|v| v.as_str())
@@ -56,7 +62,8 @@ impl MemoryInjector {
                 SysError::ApiError("missing response_topic in before_build payload".into())
             })?;
 
-        let content = match fs::read_to_string(MEMORY_PATH) {
+        let path = memory_path();
+        let content = match fs::read_to_string(&path) {
             Ok(c) if !c.trim().is_empty() => c,
             _ => return Ok(()),
         };
