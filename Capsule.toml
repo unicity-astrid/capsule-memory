@@ -9,7 +9,7 @@ astrid-version = ">=0.1.0"
 id = "memory"
 file = "astrid_capsule_memory.wasm"
 type = "executable"
-capabilities = { fs_read = ["cwd://"] }
+capabilities = { fs_read = ["cwd://", "home://"] }
 
 [capabilities]
 allow_prompt_injection = true
