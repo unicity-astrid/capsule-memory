@@ -82,31 +82,25 @@ impl MemoryInjector {
         let personal = read_memory("home://memory.md");
         let project = read_memory(&project_memory_path());
 
-        if personal.is_none() && project.is_none() {
+        let sections = [
+            (personal.as_deref(), "personal"),
+            (project.as_deref(), "project"),
+        ]
+        .iter()
+        .filter_map(|(content, label)| content.map(|c| (c, *label)))
+        .map(|(content, label)| {
+            let (text, truncated) = truncate(content);
+            let mut section = format!("# Memory ({label})\n\n{text}");
+            if truncated {
+                section.push_str("\n\n[Memory truncated]");
+            }
+            section
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+        if sections.is_empty() {
             return Ok(());
-        }
-
-        let mut sections = String::new();
-
-        if let Some(content) = personal {
-            let (text, truncated) = truncate(&content);
-            sections.push_str("# Memory (personal)\n\n");
-            sections.push_str(text);
-            if truncated {
-                sections.push_str("\n\n[Memory truncated]");
-            }
-        }
-
-        if let Some(content) = project {
-            if !sections.is_empty() {
-                sections.push_str("\n\n");
-            }
-            let (text, truncated) = truncate(&content);
-            sections.push_str("# Memory (project)\n\n");
-            sections.push_str(text);
-            if truncated {
-                sections.push_str("\n\n[Memory truncated]");
-            }
         }
 
         ipc::publish_json(
