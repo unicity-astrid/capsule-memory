@@ -2,7 +2,7 @@
 name = "astrid-capsule-memory"
 version = "0.1.0"
 description = "Injects cross-session memory into the system prompt via prompt builder hooks"
-authors = ["Astrid Core Team"]
+authors = ["Joshua J. Bouw <dev@joshuajbouw.com>", "Unicity Labs <info@unicity-labs.com>"]
 astrid-version = ">=0.1.0"
 
 [[component]]
