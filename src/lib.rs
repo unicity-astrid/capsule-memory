@@ -76,7 +76,10 @@ impl MemoryInjector {
             .get("response_topic")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
-                SysError::ApiError("missing response_topic in before_build payload".into())
+                SysError::ApiError(format!(
+                    "missing response_topic in before_build payload. keys: {:?}",
+                    payload.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                ))
             })?;
 
         let personal = read_memory("home://memory.md");
