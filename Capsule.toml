@@ -17,6 +17,9 @@ allow_prompt_injection = true
 [publish]
 "prompt_builder.v1.hook_response.*" = { wit = "TODO" }
 
+[subscribe]
+"prompt_builder.v1.hook.before_build" = { wit = "TODO", handler = "on_before_prompt_build" }
+
 [env]
 # Name of the project folder scanned for memory.md (set by the distro).
 # Override to rebrand without forking: set cwd_dir = ".myagent" in your Distro.toml.
