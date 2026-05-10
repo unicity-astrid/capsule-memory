@@ -15,10 +15,10 @@ capabilities = { fs_read = ["cwd://", "home://"] }
 allow_prompt_injection = true
 
 [publish]
-"prompt_builder.v1.hook_response.*" = { wit = "TODO" }
+"prompt_builder.v1.hook_response.*" = { wit = "@unicity-astrid/wit/prompt/before-build-hook-response" }
 
 [subscribe]
-"prompt_builder.v1.hook.before_build" = { wit = "TODO", handler = "on_before_prompt_build" }
+"prompt_builder.v1.hook.before_build" = { wit = "@unicity-astrid/wit/prompt/before-build-hook", handler = "on_before_prompt_build" }
 
 [env]
 # Name of the project folder scanned for memory.md (set by the distro).
