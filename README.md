@@ -28,7 +28,6 @@ This capsule handles the read/inject side only. The agent writes to `.astrid/mem
 ## Development
 
 ```bash
-rustup target add wasm32-unknown-unknown
 cargo build --target wasm32-unknown-unknown --release
 ```
 
